@@ -10,7 +10,6 @@ import re
 import uuid
 import webbrowser
 
-
 class NewConnectionDialog(simpledialog.Dialog):
     def body(self, master):
         tk.Label(master, text="Host:").grid(row=0)
