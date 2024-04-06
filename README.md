@@ -2,6 +2,8 @@
 
 **shellCellar** is a Python SSH manager developed using Tkinter, allowing you to securely manage your SSH connections with ease. It provides a simple and intuitive interface to add, edit, and connect to SSH hosts.
 
+![](https://github.com/b3b0/shellCellar/blob/main/shellCellar.gif)
+
 ## Features
 - Add, edit, and delete SSH connections
 - Securely encrypt and store passwords
