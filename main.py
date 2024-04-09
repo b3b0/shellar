@@ -3,31 +3,35 @@ from tkinter import ttk, simpledialog, messagebox
 import json
 import hashlib
 import os
-import paramiko
-import threading
+import subprocess
 import logging
 import re
 import uuid
 import webbrowser
+import shlex
 
 class NewConnectionDialog(simpledialog.Dialog):
     def body(self, master):
-        tk.Label(master, text="Host:").grid(row=0)
-        tk.Label(master, text="Username:").grid(row=1)
-        tk.Label(master, text="Password:").grid(row=2)
+        tk.Label(master, text="Friendly Name:").grid(row=0)
+        tk.Label(master, text="Host:").grid(row=1)
+        tk.Label(master, text="Username:").grid(row=2)
+        tk.Label(master, text="Password:").grid(row=3)
 
+        self.friendly_name_entry = tk.Entry(master)
         self.host_entry = tk.Entry(master)
         self.username_entry = tk.Entry(master)
         self.password_entry = tk.Entry(master, show='*')
 
-        self.host_entry.grid(row=0, column=1)
-        self.username_entry.grid(row=1, column=1)
-        self.password_entry.grid(row=2, column=1)
+        self.friendly_name_entry.grid(row=0, column=1)
+        self.host_entry.grid(row=1, column=1)
+        self.username_entry.grid(row=2, column=1)
+        self.password_entry.grid(row=3, column=1)
 
-        return self.host_entry
+        return self.friendly_name_entry
 
     def apply(self):
         self.result = {
+            'friendly_name': self.friendly_name_entry.get(),
             'host': self.host_entry.get(),
             'username': self.username_entry.get(),
             'password': self.password_entry.get()
@@ -35,7 +39,7 @@ class NewConnectionDialog(simpledialog.Dialog):
 
 global master_password
 master_password = None
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.1.2"
 APP_NAME = "shellCellar"
 APP_DATA_PATH = os.path.expanduser(f"~/.{APP_NAME}")
 
@@ -46,6 +50,20 @@ CONFIG_FILE = os.path.join(APP_DATA_PATH, 'app_config.json')
 CONNECTIONS_FILE = os.path.join(APP_DATA_PATH, 'connections.json')
 
 ansi_escape = re.compile(r'\x1B[@-_][0-?]*[ -/]*[@-~]')
+
+def remove_sshpass_from_history():
+    history_file_path = os.path.expanduser("~/.zsh_history")
+    try:
+        with open(history_file_path, "r") as file:
+            lines = file.readlines()
+        with open(history_file_path, "w") as file:
+            for line in lines:
+                if "sshpass" not in line:
+                    file.write(line)
+    except Exception as e:
+        logging.error(f"Error removing sshpass from history: {e}")
+
+remove_sshpass_from_history()
 
 def strip_ansi(text):
     return ansi_escape.sub('', text)
@@ -64,91 +82,25 @@ def connect():
     host = selected_connection['host']
     username = selected_connection['username']
     password = decrypt_password(selected_connection['password'], get_master_password())
+    escaped_password = shlex.quote(password)
 
     try:
-        ssh_client = paramiko.SSHClient()
-        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh_client.connect(hostname=host, username=username, password=password)
-        new_tab = ttk.Frame(tabs)
-        tabs.add(new_tab, text=host)
-        tabs.select(new_tab)
+        command = f'sshpass -p {escaped_password} ssh -o StrictHostKeyChecking=no {username}@{host}'
+        script = f"""
+        tell application "Terminal"
+            do script "{command}"
+            activate
+            delay 1
+            set custom title of front window to "{host}"
+            do script "history -d $((HISTCMD-1))" in front window
+            do script "clear" in front window
+        end tell
+        """
 
-        ssh_output = tk.Text(new_tab, wrap=tk.NONE, state=tk.NORMAL)
-        ssh_output.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
+        subprocess.run(["osascript", "-e", script])
 
-        command_entry = tk.Entry(new_tab)
-        command_entry.pack(fill=tk.X, side=tk.BOTTOM)
-        command_entry.focus_set()
-
-        session_active = [True]
-
-        channel = ssh_client.invoke_shell()
-
-        def update_output():
-            while session_active[0]:
-                if channel.recv_ready():
-                    data = channel.recv(1024).decode()
-                    data = strip_ansi(data)
-                    if "exit" in data:
-                        session_active[0] = False
-                        root.after(100, lambda: tabs.forget(new_tab))
-                    ssh_output.config(state=tk.NORMAL)
-                    ssh_output.insert(tk.END, data)
-                    ssh_output.see(tk.END)
-                    ssh_output.config(state=tk.DISABLED)
-
-        update_thread = threading.Thread(target=update_output)
-        update_thread.daemon = True
-        update_thread.start()
-
-        command_history = []
-        history_index = -1
-
-        def send_command(event):
-            global history_index
-            if event.keysym == "Return":
-                command = command_entry.get()
-                channel.send("\r")
-                channel.send(command + "\n")
-                command_entry.delete(0, tk.END)
-                if command.strip():
-                    command_history.append(command)
-                    history_index = len(command_history)
-            elif event.keysym == "Tab":
-                command = command_entry.get()
-                channel.send(command + "\t\t")
-                command_entry.delete(0, tk.END)
-                command_entry.focus_set()
-                return "break"
-            elif event.keysym == "Up":
-                if history_index > 0:
-                    history_index -= 1
-                    command_entry.delete(0, tk.END)
-                    command_entry.insert(0, command_history[history_index])
-                return "break"
-            elif event.keysym == "Down":
-                if history_index < len(command_history) - 1:
-                    history_index += 1
-                    command_entry.delete(0, tk.END)
-                    command_entry.insert(0, command_history[history_index])
-                elif history_index == len(command_history) - 1:
-                    history_index += 1
-                    command_entry.delete(0, tk.END)
-                return "break"
-
-        command_entry.bind("<Tab>", send_command)
-        command_entry.bind("<Return>", send_command)
-        command_entry.bind("<Up>", send_command)
-        command_entry.bind("<Down>", send_command)
-
-
-
-    except paramiko.AuthenticationException:
-        messagebox.showerror("Authentication Error", "Authentication failed. Please check your username and password.")
     except Exception as e:
         messagebox.showerror("SSH Connection Error", str(e))
-
-
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -186,13 +138,13 @@ def add_first_connection(master_password):
 
     dialog = NewConnectionDialog(root, title="New Connection")
     if dialog.result:
+        friendly_name = dialog.result['friendly_name']
         host = dialog.result['host']
         username = dialog.result['username']
         password = dialog.result['password']
         encrypted_password = encrypt_password(password, master_password)
-        connections.append({'host': host, 'username': username, 'password': encrypted_password})
+        connections.append({'friendly_name': friendly_name, 'host': host, 'username': username, 'password': encrypted_password})
         save_connections(connections)
-
 
 def set_master_password():
     print("SETTING MASTER")
@@ -240,7 +192,6 @@ else:
         messagebox.showerror("Error", "Master password is required")
         exit()
 
-
 paned_window = ttk.Panedwindow(root, orient=tk.HORIZONTAL)
 paned_window.pack(fill=tk.BOTH, expand=True)
 
@@ -263,12 +214,12 @@ radiobuttons_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=c
 editor_frame = ttk.Frame(left_frame)
 editor_frame.pack(fill=tk.BOTH, expand=True)
 connect_button = ttk.Button(editor_frame, text="Connect", command=connect)
-connect_button.grid(row=3, column=0, sticky=tk.W)
 host_label = ttk.Label(editor_frame, text="Host:")
 host_label.grid(row=0, column=0, sticky=tk.W)
 host_entry = ttk.Entry(editor_frame)
 host_entry.grid(row=0, column=1, sticky=tk.EW)
-
+friendly_name_label = ttk.Label(editor_frame, text="Friendly Name:")
+friendly_name_entry = ttk.Entry(editor_frame)
 username_label = ttk.Label(editor_frame, text="Username:")
 username_label.grid(row=1, column=0, sticky=tk.W)
 username_entry = ttk.Entry(editor_frame)
@@ -294,8 +245,8 @@ def open_url():
 tab1 = ttk.Frame(tabs)
 tabs.add(tab1, text="Home")
 
-welcome_text = """Welcome back to shellCellar! 
-Version 0.1.1
+welcome_text = f"""Welcome back to {APP_NAME}! 
+Version {APP_VERSION}
 
 Written by b3b0
 """
@@ -317,6 +268,7 @@ def save_connection():
     selected_index = selected_connection_index.get()
     selected_connection = connections[selected_index]
 
+    selected_connection['friendly_name'] = friendly_name_entry.get()
     selected_connection['host'] = host_entry.get()
     selected_connection['username'] = username_entry.get()
     hashed_master_password = config['hashed_master_password']
@@ -326,8 +278,7 @@ def save_connection():
     save_connections(connections)
 
     rb = radiobuttons_frame.winfo_children()[selected_index]
-    rb.config(text=selected_connection['host'])
-
+    rb.config(text=selected_connection['friendly_name'])
 
 save_button = ttk.Button(editor_frame, text="Save", command=save_connection)
 save_button.grid(row=3, column=1, sticky=tk.E)
@@ -373,6 +324,8 @@ delete_button.grid(row=4, column=1, sticky=tk.E)
 def update_entries():
     selected_index = selected_connection_index.get()
     selected_connection = connections[selected_index]
+    friendly_name_entry.delete(0, tk.END)
+    friendly_name_entry.insert(0, selected_connection.get('friendly_name', ''))
     host_entry.delete(0, tk.END)
     host_entry.insert(0, selected_connection['host'])
     username_entry.delete(0, tk.END)
@@ -387,9 +340,25 @@ def update_entries():
     password_entry.config(show="*")
 
 for index, connection in enumerate(connections):
-    rb = ttk.Radiobutton(radiobuttons_frame, text=connection['host'], variable=selected_connection_index, value=index, command=update_entries)
+    rb = ttk.Radiobutton(radiobuttons_frame, text=connection.get('friendly_name', connection['host']), variable=selected_connection_index, value=index, command=update_entries)
     rb.pack(anchor=tk.W)
 
 update_entries()
 
+def update_editor_frame_layout():
+    add_button.grid(row=0, column=0, sticky=tk.W, pady=(0, 10))
+    friendly_name_label.grid(row=1, column=0, sticky=tk.W)
+    friendly_name_entry.grid(row=1, column=1, sticky=tk.EW)
+    host_label.grid(row=2, column=0, sticky=tk.W)
+    host_entry.grid(row=2, column=1, sticky=tk.EW)
+    username_label.grid(row=3, column=0, sticky=tk.W)
+    username_entry.grid(row=3, column=1, sticky=tk.EW)
+    password_label.grid(row=4, column=0, sticky=tk.W)
+    password_entry.grid(row=4, column=1, sticky=tk.EW)
+    save_button.grid(row=5, column=0, sticky=tk.W)
+    delete_button.grid(row=6, column=0, sticky=tk.E)
+    connect_button.grid(row=5, column=1, sticky=tk.E)
+
+update_editor_frame_layout()
+root.bind("<Destroy>", lambda event: remove_sshpass_from_history())
 root.mainloop()
