@@ -1,1 +1,1 @@
-rm -rf ~/.shellCellar/*
+rm -rf ~/.shellar.io/*

@@ -40,7 +40,7 @@ class NewConnectionDialog(simpledialog.Dialog):
 global master_password
 master_password = None
 APP_VERSION = "0.1.2"
-APP_NAME = "shellCellar"
+APP_NAME = "shellar.io"
 APP_DATA_PATH = os.path.expanduser(f"~/.{APP_NAME}")
 
 if not os.path.exists(APP_DATA_PATH):
@@ -170,7 +170,7 @@ connections = load_connections()
 
 root = tk.Tk()
 root.title(f"{APP_NAME} - {APP_VERSION}")
-root.geometry("1200x600")
+root.geometry("600x600")
 
 selected_connection_index = tk.IntVar(value=0)
 
@@ -195,7 +195,7 @@ else:
 paned_window = ttk.Panedwindow(root, orient=tk.HORIZONTAL)
 paned_window.pack(fill=tk.BOTH, expand=True)
 
-left_frame = ttk.Frame(paned_window, width=100)
+left_frame = ttk.Frame(paned_window, width=60)
 paned_window.add(left_frame, weight=1)
 
 connections_label = ttk.Label(left_frame, text="Connections")
@@ -233,14 +233,14 @@ password_entry.grid(row=2, column=1, sticky=tk.EW)
 connect_button = ttk.Button(editor_frame, text="Connect", command=connect)
 connect_button.grid(row=3, column=1, sticky=tk.E)
 
-right_frame = ttk.Frame(paned_window, width=1100)
+right_frame = ttk.Frame(paned_window, width=600)
 paned_window.add(right_frame, weight=10)
 
 tabs = ttk.Notebook(right_frame)
 tabs.pack(fill=tk.BOTH, expand=True)
 
 def open_url():
-    webbrowser.open_new("https://github.com/b3b0/shellCellar")
+    webbrowser.open_new("https://github.com/b3b0/shellar.io")
 
 tab1 = ttk.Frame(tabs)
 tabs.add(tab1, text="Home")
@@ -357,7 +357,7 @@ def update_editor_frame_layout():
     password_entry.grid(row=4, column=1, sticky=tk.EW)
     save_button.grid(row=5, column=0, sticky=tk.W)
     delete_button.grid(row=6, column=0, sticky=tk.E)
-    connect_button.grid(row=5, column=1, sticky=tk.E)
+    connect_button.grid(row=0, column=1, sticky=tk.E)
 
 update_editor_frame_layout()
 root.bind("<Destroy>", lambda event: remove_sshpass_from_history())
