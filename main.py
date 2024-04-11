@@ -8,24 +8,23 @@ import logging
 import re
 import uuid
 import webbrowser
-import shlex
+import requests
+import markdown
+from tkhtmlview import HTMLLabel
 
 class NewConnectionDialog(simpledialog.Dialog):
     def body(self, master):
         tk.Label(master, text="Friendly Name:").grid(row=0)
         tk.Label(master, text="Host:").grid(row=1)
         tk.Label(master, text="Username:").grid(row=2)
-        tk.Label(master, text="Password:").grid(row=3)
 
         self.friendly_name_entry = tk.Entry(master)
         self.host_entry = tk.Entry(master)
         self.username_entry = tk.Entry(master)
-        self.password_entry = tk.Entry(master, show='*')
 
         self.friendly_name_entry.grid(row=0, column=1)
         self.host_entry.grid(row=1, column=1)
         self.username_entry.grid(row=2, column=1)
-        self.password_entry.grid(row=3, column=1)
 
         return self.friendly_name_entry
 
@@ -34,12 +33,11 @@ class NewConnectionDialog(simpledialog.Dialog):
             'friendly_name': self.friendly_name_entry.get(),
             'host': self.host_entry.get(),
             'username': self.username_entry.get(),
-            'password': self.password_entry.get()
         }
 
 global master_password
 master_password = None
-APP_VERSION = "0.1.2"
+APP_VERSION = "0.2.0"
 APP_NAME = "shellar.io"
 APP_DATA_PATH = os.path.expanduser(f"~/.{APP_NAME}")
 
@@ -79,28 +77,66 @@ def connect():
     selected_index = selected_connection_index.get()
     selected_connection = connections[selected_index]
 
-    host = selected_connection['host']
     username = selected_connection['username']
-    password = decrypt_password(selected_connection['password'], get_master_password())
-    escaped_password = shlex.quote(password)
+    host = selected_connection['host']
 
-    try:
-        command = f'sshpass -p {escaped_password} ssh -o StrictHostKeyChecking=no {username}@{host}'
-        script = f"""
-        tell application "Terminal"
-            do script "{command}"
-            activate
-            delay 1
-            set custom title of front window to "{host}"
-            do script "history -d $((HISTCMD-1))" in front window
-            do script "clear" in front window
-        end tell
-        """
+    tools_path = os.path.expanduser(f"~/.{APP_NAME}/tools")
+    script_path = os.path.join(tools_path, "setupKey.sh")
 
-        subprocess.run(["osascript", "-e", script])
+    if not os.path.exists(tools_path):
+        os.makedirs(tools_path)
 
-    except Exception as e:
-        messagebox.showerror("SSH Connection Error", str(e))
+    if not os.path.exists(script_path):
+        with open(script_path, "w") as script_file:
+            script_file.write("""#!/bin/bash
+clear
+setup_success=true
+
+if [ ! -f ~/.ssh/id_rsa ]; then
+    echo "No SSH key found. Generating a new one..."
+    if ! command -v ssh-keygen &> /dev/null; then
+        echo "ssh-keygen not found. Please install it using your package manager."
+        setup_success=false
+    else
+        ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+    fi
+fi
+
+if [ "$setup_success" = true ]; then
+    echo "Trying to authenticate with the server using the SSH key..."
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$1@$2" exit
+
+    if [ $? -ne 0 ]; then
+        echo "Authentication failed. Attempting to copy SSH key to the server..."
+        if ! command -v ssh-copy-id &> /dev/null; then
+            echo "ssh-copy-id not found. Please install it using your package manager."
+            setup_success=false
+        else
+            ssh-copy-id "$1@$2"
+        fi
+    fi
+fi
+
+if [ "$setup_success" = true ]; then
+    echo "Connecting to $2 as $1..."
+    ssh "$1@$2"
+else
+    echo "SSH setup failed. Please resolve the issues and try again."
+fi
+sleep 10
+""")
+        os.chmod(script_path, 0o755)
+
+    applescript_command = f'''
+    tell application "Terminal"
+        do script "bash \\"{script_path}\\" \\"{username}\\" \\"{host}\\""
+        activate
+    end tell
+    '''
+
+    messagebox.showinfo("SSH Key Setup", "Attempting to set up SSH key authentication. A new Terminal window will open for this process.")
+
+    subprocess.run(["osascript", "-e", applescript_command], check=True)
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -124,12 +160,6 @@ def save_connections(connections):
     with open(CONNECTIONS_FILE, 'w') as file:
         json.dump(connections, file)
 
-def encrypt_password(password, key):
-    return ''.join(chr(ord(c) ^ ord(k)) for c, k in zip(password, key * (len(password) // len(key) + 1)))
-
-def decrypt_password(encrypted_password, key):
-    return ''.join(chr(ord(c) ^ ord(k)) for c, k in zip(encrypted_password, key * (len(encrypted_password) // len(key) + 1)))
-
 def add_first_connection(master_password):
     print("ADDING FIRST")
     master_password = config['hashed_master_password']
@@ -141,21 +171,25 @@ def add_first_connection(master_password):
         friendly_name = dialog.result['friendly_name']
         host = dialog.result['host']
         username = dialog.result['username']
-        password = dialog.result['password']
-        encrypted_password = encrypt_password(password, master_password)
-        connections.append({'friendly_name': friendly_name, 'host': host, 'username': username, 'password': encrypted_password})
+        connections.append({'friendly_name': friendly_name, 'host': host, 'username': username})
         save_connections(connections)
 
 def set_master_password():
     print("SETTING MASTER")
     master_password = simpledialog.askstring("Master Password", "Set a master password:", show='*')
-    if master_password:
-        hashed_master_password = hashlib.sha256(master_password.encode()).hexdigest()
-        config['master_password_set'] = True
-        config['hashed_master_password'] = hashed_master_password
-        save_config(config)
+    confirm_password = simpledialog.askstring("Confirm Master Password", "Confirm master password:", show='*')
+    if master_password and confirm_password:
+        if master_password == confirm_password:
+            hashed_master_password = hashlib.sha256(master_password.encode()).hexdigest()
+            config['master_password_set'] = True
+            config['hashed_master_password'] = hashed_master_password
+            save_config(config)
+        else:
+            messagebox.showerror("Error", "Passwords do not match. Please try again.")
+            set_master_password()
     else:
         raise Exception("Master password is required")
+
 
 def verify_master_password():
     input_password = simpledialog.askstring("Master Password", "Enter master password:", show='*')
@@ -170,7 +204,7 @@ connections = load_connections()
 
 root = tk.Tk()
 root.title(f"{APP_NAME} - {APP_VERSION}")
-root.geometry("600x600")
+root.geometry("800x600")
 
 selected_connection_index = tk.IntVar(value=0)
 
@@ -225,11 +259,6 @@ username_label.grid(row=1, column=0, sticky=tk.W)
 username_entry = ttk.Entry(editor_frame)
 username_entry.grid(row=1, column=1, sticky=tk.EW)
 
-password_label = ttk.Label(editor_frame, text="Password:")
-password_label.grid(row=2, column=0, sticky=tk.W)
-password_entry = ttk.Entry(editor_frame, show="*")
-password_entry.grid(row=2, column=1, sticky=tk.EW)
-
 connect_button = ttk.Button(editor_frame, text="Connect", command=connect)
 connect_button.grid(row=3, column=1, sticky=tk.E)
 
@@ -245,24 +274,19 @@ def open_url():
 tab1 = ttk.Frame(tabs)
 tabs.add(tab1, text="Home")
 
-welcome_text = f"""Welcome back to {APP_NAME}! 
-Version {APP_VERSION}
+def load_readme():
+    url = "https://raw.githubusercontent.com/b3b0/shellar.io/main/README.md"
+    response = requests.get(url)
+    if response.status_code == 200:
+        readme_content = response.text
+        html_content = markdown.markdown(readme_content)
+        return html_content
+    else:
+        return "<h1>Failed to load README.md</h1>"
 
-Written by b3b0
-"""
-
-welcome_label = tk.Label(tab1, text=welcome_text, justify=tk.CENTER)
-welcome_label.pack(padx=10, pady=10)
-url_button = ttk.Button(tab1, text="GitHub", command=open_url)
-url_button.pack(pady=10)
-
-#image_path = 'icons/shellCellar.iconset/icon_512x512.png'
-#image = tk.PhotoImage(file=image_path)
-#image = image.subsample(2, 2)
-
-#image_label = tk.Label(tab1, image=image)
-#image_label.image = image
-#image_label.pack(side=tk.BOTTOM, pady=10)
+readme_html = load_readme()
+readme_label = HTMLLabel(tab1, html=readme_html, background="white")
+readme_label.pack(fill="both", expand=True)
 
 def save_connection():
     selected_index = selected_connection_index.get()
@@ -271,9 +295,6 @@ def save_connection():
     selected_connection['friendly_name'] = friendly_name_entry.get()
     selected_connection['host'] = host_entry.get()
     selected_connection['username'] = username_entry.get()
-    hashed_master_password = config['hashed_master_password']
-    encrypted_password = encrypt_password(password_entry.get(), hashed_master_password)
-    selected_connection['password'] = encrypted_password
 
     save_connections(connections)
 
@@ -285,7 +306,7 @@ save_button.grid(row=3, column=1, sticky=tk.E)
 
 def add_new_connection():
     guid = str(uuid.uuid4())[:5]
-    new_connection = {'host': guid, 'username': '', 'password': ''}
+    new_connection = {'host': guid, 'username': ''}
     connections.append(new_connection)
     save_connections(connections)
 
@@ -315,7 +336,6 @@ def delete_connection():
             if not connections:
                 host_entry.delete(0, tk.END)
                 username_entry.delete(0, tk.END)
-                password_entry.delete(0, tk.END)
                 selected_connection_index.set(-1)
 
 delete_button = ttk.Button(editor_frame, text="Delete", command=delete_connection)
@@ -330,14 +350,6 @@ def update_entries():
     host_entry.insert(0, selected_connection['host'])
     username_entry.delete(0, tk.END)
     username_entry.insert(0, selected_connection['username'])
-    master_password = get_master_password()
-    if master_password:
-        decrypted_password = decrypt_password(selected_connection['password'], master_password)
-        password_entry.delete(0, tk.END)
-        password_entry.insert(0, decrypted_password)
-    else:
-        password_entry.delete(0, tk.END)
-    password_entry.config(show="*")
 
 for index, connection in enumerate(connections):
     rb = ttk.Radiobutton(radiobuttons_frame, text=connection.get('friendly_name', connection['host']), variable=selected_connection_index, value=index, command=update_entries)
@@ -353,8 +365,6 @@ def update_editor_frame_layout():
     host_entry.grid(row=2, column=1, sticky=tk.EW)
     username_label.grid(row=3, column=0, sticky=tk.W)
     username_entry.grid(row=3, column=1, sticky=tk.EW)
-    password_label.grid(row=4, column=0, sticky=tk.W)
-    password_entry.grid(row=4, column=1, sticky=tk.EW)
     save_button.grid(row=5, column=0, sticky=tk.W)
     delete_button.grid(row=6, column=0, sticky=tk.E)
     connect_button.grid(row=0, column=1, sticky=tk.E)

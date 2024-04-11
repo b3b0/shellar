@@ -1,1 +1,3 @@
-paramiko>=2.10.1
+requests
+markdown
+tkhtmlview
