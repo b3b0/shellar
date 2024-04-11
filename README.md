@@ -1,7 +1,3 @@
-Here's an updated version of the README with the additional emphasis on installers, macOS exclusivity, competition, and a call to action for contributions:
-
----
-
 # shellar.io
 
 **shellar.io** is an open-source graphical SSH manager exclusively for macOS, designed to provide a secure and user-friendly alternative to popular tools like SecureCRT, Royal TSX, and Terminus. With a focus on key-based authentication and ease of use, shellar.io aims to be the go-to choice for managing SSH connections on macOS.
