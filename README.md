@@ -36,7 +36,3 @@ We need your help to make shellar.io the best open-source SSH manager for macOS!
 ## License
 
 shellar.io is released under the GPL 3.0 License. See [LICENSE](LICENSE) for more details.
-
----
-
-Feel free to adjust the content to better align with your project's goals and messaging.
