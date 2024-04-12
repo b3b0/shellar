@@ -37,7 +37,7 @@ class NewConnectionDialog(simpledialog.Dialog):
 
 global master_password
 master_password = None
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 APP_NAME = "shellar.io"
 APP_DATA_PATH = os.path.expanduser(f"~/.{APP_NAME}")
 
@@ -123,7 +123,6 @@ if [ "$setup_success" = true ]; then
 else
     echo "SSH setup failed. Please resolve the issues and try again."
 fi
-sleep 10
 """)
         os.chmod(script_path, 0o755)
 
@@ -133,8 +132,6 @@ sleep 10
         activate
     end tell
     '''
-
-    messagebox.showinfo("SSH Key Setup", "Attempting to set up SSH key authentication. A new Terminal window will open for this process.")
 
     subprocess.run(["osascript", "-e", applescript_command], check=True)
 
