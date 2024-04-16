@@ -37,7 +37,7 @@ class NewConnectionDialog(simpledialog.Dialog):
 
 global master_password
 master_password = None
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.2.2"
 APP_NAME = "shellar.io"
 APP_DATA_PATH = os.path.expanduser(f"~/.{APP_NAME}")
 
@@ -74,6 +74,15 @@ def get_master_password():
     return hashed_master_password
 
 def connect():
+    if has_unsaved_changes():
+        if messagebox.askyesno("Unsaved Changes", "You have unsaved changes. Would you like to save them before connecting?"):
+            save_connection()
+        else:
+            update_entries()
+
+    initiate_connection()
+
+def initiate_connection():
     selected_index = selected_connection_index.get()
     selected_connection = connections[selected_index]
 
@@ -87,44 +96,7 @@ def connect():
         os.makedirs(tools_path)
 
     if not os.path.exists(script_path):
-        with open(script_path, "w") as script_file:
-            script_file.write("""#!/bin/bash
-clear
-setup_success=true
-
-if [ ! -f ~/.ssh/id_rsa ]; then
-    echo "No SSH key found. Generating a new one..."
-    if ! command -v ssh-keygen &> /dev/null; then
-        echo "ssh-keygen not found. Please install it using your package manager."
-        setup_success=false
-    else
-        ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
-    fi
-fi
-
-if [ "$setup_success" = true ]; then
-    echo "Trying to authenticate with the server using the SSH key..."
-    ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$1@$2" exit
-
-    if [ $? -ne 0 ]; then
-        echo "Authentication failed. Attempting to copy SSH key to the server..."
-        if ! command -v ssh-copy-id &> /dev/null; then
-            echo "ssh-copy-id not found. Please install it using your package manager."
-            setup_success=false
-        else
-            ssh-copy-id "$1@$2"
-        fi
-    fi
-fi
-
-if [ "$setup_success" = true ]; then
-    echo "Connecting to $2 as $1..."
-    ssh "$1@$2"
-else
-    echo "SSH setup failed. Please resolve the issues and try again."
-fi
-""")
-        os.chmod(script_path, 0o755)
+        create_setup_script(script_path)
 
     applescript_command = f'''
     tell application "Terminal"
@@ -132,8 +104,9 @@ fi
         activate
     end tell
     '''
-
     subprocess.run(["osascript", "-e", applescript_command], check=True)
+
+
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -245,12 +218,12 @@ radiobuttons_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=c
 editor_frame = ttk.Frame(left_frame)
 editor_frame.pack(fill=tk.BOTH, expand=True)
 connect_button = ttk.Button(editor_frame, text="Connect", command=connect)
+friendly_name_label = ttk.Label(editor_frame, text="Friendly Name:")
+friendly_name_entry = ttk.Entry(editor_frame)
 host_label = ttk.Label(editor_frame, text="Host:")
 host_label.grid(row=0, column=0, sticky=tk.W)
 host_entry = ttk.Entry(editor_frame)
 host_entry.grid(row=0, column=1, sticky=tk.EW)
-friendly_name_label = ttk.Label(editor_frame, text="Friendly Name:")
-friendly_name_entry = ttk.Entry(editor_frame)
 username_label = ttk.Label(editor_frame, text="Username:")
 username_label.grid(row=1, column=0, sticky=tk.W)
 username_entry = ttk.Entry(editor_frame)
@@ -271,19 +244,19 @@ def open_url():
 tab1 = ttk.Frame(tabs)
 tabs.add(tab1, text="Home")
 
-def load_readme():
+def load_readme(tab):
     url = "https://raw.githubusercontent.com/b3b0/shellar.io/main/README.md"
     response = requests.get(url)
     if response.status_code == 200:
         readme_content = response.text
-        html_content = markdown.markdown(readme_content)
-        return html_content
+        html_content = markdown.markdown(readme_content)  # Convert Markdown to HTML
+        readme_label = HTMLLabel(tab, html=html_content, background="white")
+        readme_label.pack(fill="both", expand=True)
     else:
-        return "<h1>Failed to load README.md</h1>"
+        error_label = tk.Label(tab, text="Failed to load README.md", font=("Helvetica", 16))
+        error_label.pack(pady=20)
 
-readme_html = load_readme()
-readme_label = HTMLLabel(tab1, html=readme_html, background="white")
-readme_label.pack(fill="both", expand=True)
+readme_html = load_readme(tab1)
 
 def save_connection():
     selected_index = selected_connection_index.get()
@@ -339,6 +312,7 @@ delete_button = ttk.Button(editor_frame, text="Delete", command=delete_connectio
 delete_button.grid(row=4, column=1, sticky=tk.E)
 
 def update_entries():
+    """ Update entry widgets with the selected connection details. """
     selected_index = selected_connection_index.get()
     selected_connection = connections[selected_index]
     friendly_name_entry.delete(0, tk.END)
@@ -349,10 +323,66 @@ def update_entries():
     username_entry.insert(0, selected_connection['username'])
 
 for index, connection in enumerate(connections):
-    rb = ttk.Radiobutton(radiobuttons_frame, text=connection.get('friendly_name', connection['host']), variable=selected_connection_index, value=index, command=update_entries)
+    rb = ttk.Radiobutton(radiobuttons_frame, text=connection.get('friendly_name', connection['host']), variable=selected_connection_index, value=index)
     rb.pack(anchor=tk.W)
+    rb.bind("<Button-1>", lambda event, idx=index: selected_connection_index.set(idx) or update_entries())
+    rb.bind("<Double-1>", lambda event, idx=index: selected_connection_index.set(idx) or connect()) 
 
-update_entries()
+if connections:
+    update_entries()
+
+def has_unsaved_changes():
+    selected_index = selected_connection_index.get()
+    selected_connection = connections[selected_index]
+    current_details = {
+        'friendly_name': friendly_name_entry.get(),
+        'host': host_entry.get(),
+        'username': username_entry.get(),
+    }
+
+    return any(current_details[key] != selected_connection[key] for key in current_details)
+
+
+def create_setup_script(script_path):
+    """ Creates the SSH setup script if it doesn't exist. """
+    with open(script_path, "w") as script_file:
+        script_file.write("""#!/bin/bash
+clear
+setup_success=true
+
+if [ ! -f ~/.ssh/id_rsa ]; then
+    echo "No SSH key found. Generating a new one..."
+    if ! command -v ssh-keygen &> /dev/null; then
+        echo "ssh-keygen not found. Please install it using your package manager."
+        setup_success=false
+    else
+        ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+    fi
+fi
+
+if [ "$setup_success" = true ]; then
+    echo "Trying to authenticate with the server using the SSH key..."
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$1@$2" exit
+
+    if [ $? -ne 0 ]; then
+        echo "Authentication failed. Attempting to copy SSH key to the server..."
+        if ! command -v ssh-copy-id &> /dev/null; then
+            echo "ssh-copy-id not found. Please install it using your package manager."
+            setup_success=false
+        else
+            ssh-copy-id "$1@$2"
+        fi
+    fi
+fi
+
+if [ "$setup_success" = true ]; then
+    echo "Connecting to $2 as $1..."
+    ssh "$1@$2"
+else
+    echo "SSH setup failed. Please resolve the issues and try again."
+fi
+""")
+    os.chmod(script_path, 0o755)
 
 def update_editor_frame_layout():
     add_button.grid(row=0, column=0, sticky=tk.W, pady=(0, 10))
