@@ -369,5 +369,4 @@ def update_editor_frame_layout():
     connect_button.grid(row=0, column=1, sticky=tk.E)
 
 update_editor_frame_layout()
-root.bind("<Destroy>", lambda event: remove_sshpass_from_history())
 root.mainloop()
