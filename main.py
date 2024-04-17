@@ -37,7 +37,7 @@ class NewConnectionDialog(simpledialog.Dialog):
 
 global master_password
 master_password = None
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.3.0"
 APP_NAME = "shellar.io"
 APP_DATA_PATH = os.path.expanduser(f"~/.{APP_NAME}")
 
@@ -47,25 +47,6 @@ if not os.path.exists(APP_DATA_PATH):
 CONFIG_FILE = os.path.join(APP_DATA_PATH, 'app_config.json')
 CONNECTIONS_FILE = os.path.join(APP_DATA_PATH, 'connections.json')
 
-ansi_escape = re.compile(r'\x1B[@-_][0-?]*[ -/]*[@-~]')
-
-def remove_sshpass_from_history():
-    history_file_path = os.path.expanduser("~/.zsh_history")
-    try:
-        with open(history_file_path, "r") as file:
-            lines = file.readlines()
-        with open(history_file_path, "w") as file:
-            for line in lines:
-                if "sshpass" not in line:
-                    file.write(line)
-    except Exception as e:
-        logging.error(f"Error removing sshpass from history: {e}")
-
-remove_sshpass_from_history()
-
-def strip_ansi(text):
-    return ansi_escape.sub('', text)
-
 logging.basicConfig(level=logging.DEBUG)
 
 def get_master_password():
@@ -74,39 +55,30 @@ def get_master_password():
     return hashed_master_password
 
 def connect():
-    if has_unsaved_changes():
-        if messagebox.askyesno("Unsaved Changes", "You have unsaved changes. Would you like to save them before connecting?"):
-            save_connection()
-        else:
-            update_entries()
-
-    initiate_connection()
-
-def initiate_connection():
     selected_index = selected_connection_index.get()
     selected_connection = connections[selected_index]
-
     username = selected_connection['username']
     host = selected_connection['host']
+    initiate_connection(username, host)
 
+def initiate_connection(username, host):
     tools_path = os.path.expanduser(f"~/.{APP_NAME}/tools")
     script_path = os.path.join(tools_path, "setupKey.sh")
-
-    if not os.path.exists(tools_path):
-        os.makedirs(tools_path)
-
     if not os.path.exists(script_path):
         create_setup_script(script_path)
 
-    applescript_command = f'''
+    applescript_command = f"""
     tell application "Terminal"
-        do script "bash \\"{script_path}\\" \\"{username}\\" \\"{host}\\""
+        if not (exists window 1) then
+            do script "bash \\"{script_path}\\" \\"{username}\\" \\"{host}\\""
+        else
+            tell application "System Events" to tell process "Terminal" to keystroke "t" using command down
+            do script "bash \\"{script_path}\\" \\"{username}\\" \\"{host}\\"" in window 1
+        end if
         activate
     end tell
-    '''
+    """
     subprocess.run(["osascript", "-e", applescript_command], check=True)
-
-
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -160,7 +132,6 @@ def set_master_password():
     else:
         raise Exception("Master password is required")
 
-
 def verify_master_password():
     input_password = simpledialog.askstring("Master Password", "Enter master password:", show='*')
     if input_password:
@@ -174,7 +145,7 @@ connections = load_connections()
 
 root = tk.Tk()
 root.title(f"{APP_NAME} - {APP_VERSION}")
-root.geometry("800x600")
+root.geometry("900x600")
 
 selected_connection_index = tk.IntVar(value=0)
 
@@ -198,10 +169,8 @@ else:
 
 paned_window = ttk.Panedwindow(root, orient=tk.HORIZONTAL)
 paned_window.pack(fill=tk.BOTH, expand=True)
-
 left_frame = ttk.Frame(paned_window, width=60)
 paned_window.add(left_frame, weight=1)
-
 connections_label = ttk.Label(left_frame, text="Connections")
 connections_label.pack(anchor=tk.NW)
 connections_frame = ttk.Frame(left_frame)
@@ -214,7 +183,6 @@ canvas.pack(side="left", fill="both", expand=True)
 scrollbar.pack(side="right", fill="y")
 canvas.create_window((0, 0), window=radiobuttons_frame, anchor="nw")
 radiobuttons_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-
 editor_frame = ttk.Frame(left_frame)
 editor_frame.pack(fill=tk.BOTH, expand=True)
 connect_button = ttk.Button(editor_frame, text="Connect", command=connect)
@@ -228,46 +196,55 @@ username_label = ttk.Label(editor_frame, text="Username:")
 username_label.grid(row=1, column=0, sticky=tk.W)
 username_entry = ttk.Entry(editor_frame)
 username_entry.grid(row=1, column=1, sticky=tk.EW)
-
 connect_button = ttk.Button(editor_frame, text="Connect", command=connect)
 connect_button.grid(row=3, column=1, sticky=tk.E)
 
-right_frame = ttk.Frame(paned_window, width=600)
+def open_url():
+    webbrowser.open_new("https://github.com/b3b0/shellar.io")
+
+right_frame = ttk.Frame(paned_window, width=1000)
 paned_window.add(right_frame, weight=10)
 
 tabs = ttk.Notebook(right_frame)
 tabs.pack(fill=tk.BOTH, expand=True)
 
-def open_url():
-    webbrowser.open_new("https://github.com/b3b0/shellar.io")
+def resize_event(event):
+    label.config(wraplength=event.width - 10)
 
 tab1 = ttk.Frame(tabs)
 tabs.add(tab1, text="Home")
 
-def load_readme(tab):
-    url = "https://raw.githubusercontent.com/b3b0/shellar.io/main/README.md"
-    response = requests.get(url)
-    if response.status_code == 200:
-        readme_content = response.text
-        html_content = markdown.markdown(readme_content)  # Convert Markdown to HTML
-        readme_label = HTMLLabel(tab, html=html_content, background="white")
-        readme_label.pack(fill="both", expand=True)
-    else:
-        error_label = tk.Label(tab, text="Failed to load README.md", font=("Helvetica", 16))
-        error_label.pack(pady=20)
+cta_text = """
+We need your help to make shellar.io the best open-source SSH manager for macOS! 
+Whether you're a developer, designer, or user, your contributions are valuable. 
+Here's how you can get involved:
 
-readme_html = load_readme(tab1)
+- Contribute: Submit pull requests with bug fixes, new features, or improvements.
+- Report: Found a bug or have a suggestion? Open an issue on GitHub.
+- Spread the Word: Share shellar.io with your friends.
+"""
+cta_label = tk.Label(tab1, text=cta_text, justify="left", wraplength=500)
+cta_label.pack(pady=10)
+
+license_text = """
+shellar.io is released under the GPL 3.0 License. See LICENSE for more details.
+"""
+license_label = tk.Label(tab1, text=license_text, justify="left", wraplength=500)
+license_label.pack(pady=10)
+
+url_button = ttk.Button(tab1, text="Open GitHub", command=open_url)
+url_button.pack(pady=20)
+
+copyright_label = tk.Label(tab1, text="© 2024 shellar.io", font=("Helvetica", 10))
+copyright_label.pack(side=tk.BOTTOM, pady=10)
 
 def save_connection():
     selected_index = selected_connection_index.get()
     selected_connection = connections[selected_index]
-
     selected_connection['friendly_name'] = friendly_name_entry.get()
     selected_connection['host'] = host_entry.get()
     selected_connection['username'] = username_entry.get()
-
     save_connections(connections)
-
     rb = radiobuttons_frame.winfo_children()[selected_index]
     rb.config(text=selected_connection['friendly_name'])
 
@@ -279,11 +256,9 @@ def add_new_connection():
     new_connection = {'host': guid, 'username': ''}
     connections.append(new_connection)
     save_connections(connections)
-
     index = len(connections) - 1
     rb = ttk.Radiobutton(radiobuttons_frame, text=guid, variable=selected_connection_index, value=index, command=update_entries)
     rb.pack(anchor=tk.W)
-
     selected_connection_index.set(index)
 
 add_button = ttk.Button(editor_frame, text="+", command=add_new_connection)
@@ -296,13 +271,11 @@ def delete_connection():
         if response:
             del connections[selected_index]
             save_connections(connections)
-
             for widget in radiobuttons_frame.winfo_children():
                 widget.destroy()
             for index, connection in enumerate(connections):
                 rb = ttk.Radiobutton(radiobuttons_frame, text=connection['host'], variable=selected_connection_index, value=index, command=update_entries)
                 rb.pack(anchor=tk.W)
-
             if not connections:
                 host_entry.delete(0, tk.END)
                 username_entry.delete(0, tk.END)
@@ -341,7 +314,6 @@ def has_unsaved_changes():
     }
 
     return any(current_details[key] != selected_connection[key] for key in current_details)
-
 
 def create_setup_script(script_path):
     """ Creates the SSH setup script if it doesn't exist. """
