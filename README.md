@@ -1,5 +1,5 @@
 <p align="center">
-<img src="https://shellar.io/images/shellar.png" width="100"/>
+<img src="https://shellar.io/images/shellar.png" width="120"/>
 </p>
 
 # shellar.io
@@ -30,7 +30,23 @@
 
 3. **Launch the Application:**
 
-   Find shellar.io in your Applications folder and start managing your SSH connections.
+   Find shellar.io in your Applications and start managing your SSH connections.
+
+## What's left to do for v1.0?
+
+### Must Have
+- total encryption of user connection files
+- more robust encryption method
+- ability to export and import connections.json
+- cleaner home screen
+- more modern UI
+- ability to organize connections into folders, drag and drop in connection pane
+- clean up janky AppleScript commands
+
+#### Nice to Have
+- twisted python shared object for RDP connections
+- custom terminal emulator that can be tabbed in main TK window
+
 
 ## Call to Action
 
