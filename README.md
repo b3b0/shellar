@@ -42,8 +42,7 @@
 - more modern UI
 - ability to organize connections into folders, drag and drop in connection pane
 - clean up janky AppleScript commands
-
-#### Nice to Have
+### Nice to Have
 - twisted python shared object for RDP connections
 - custom terminal emulator that can be tabbed in main TK window
 
